@@ -287,14 +287,14 @@
       rotation += 5 * 360 + ((360 - winnerCenter) - (rotation % 360) + 360) % 360;
       canvas.style.transform = `rotate(${rotation}deg)`;
 
-      canvas.addEventListener("transitionend", function show() {
+      // { once: true } → 한 번 실행되면 리스너가 자동 제거된다(누수·중복 방지)
+      canvas.addEventListener("transitionend", () => {
         const winner = menus[winnerIdx];
         document.getElementById("result").textContent = "👉 " + winner.name;
         addHistory(winner);   // ⑤ 히스토리에 추가
         spinning = false;
         document.getElementById("spinBtn").disabled = false;
-        canvas.removeEventListener("transitionend", show);
-      });
+      }, { once: true });
     }
 
     // ⑤ 히스토리: 결과를 배열에 넣고 화면 목록을 다시 그린다
