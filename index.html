@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>오늘 뭐 먹지? 🍽️</title>
+
+  <!-- =========================================================
+       STYLE: 룰렛 / 필터 / 결과 / 히스토리 스타일
+       ========================================================= -->
+  <style>
+    body {
+      font-family: -apple-system, "Apple SD Gothic Neo", sans-serif;
+      background: #0f1117;
+      color: #e7e9ee;
+      text-align: center;
+      padding: 32px 16px 60px;
+    }
+    h1 { font-size: 24px; }
+
+    /* 카테고리 체크박스들 (여러 개 동시 선택 가능) */
+    .filters {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px auto;
+    }
+    /* label로 체크박스를 감싸 클릭 영역을 넓힌다 */
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      font-size: 14px;
+      background: #1a1d27;
+      border: 1px solid #2a2e3c;
+      border-radius: 999px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .filter-chip input { accent-color: #4ecdc4; cursor: pointer; }
+    /* 체크된 항목은 강조 (label 안에 :has로 체크 여부 감지) */
+    .filter-chip:has(input:checked) {
+      background: #4ecdc4;
+      color: #06251f;
+      border-color: #4ecdc4;
+      font-weight: 700;
+    }
+
+    /* 룰렛을 감싸는 영역 (포인터를 올리기 위해 position: relative) */
+    .wheel-box {
+      position: relative;
+      width: 300px;
+      height: 300px;
+      margin: 20px auto;
+    }
+    /* 룰렛 위쪽 화살표(▼) — 여기 멈춘 칸이 당첨 */
+    .pointer {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 14px solid transparent;
+      border-right: 14px solid transparent;
+      border-top: 24px solid #ff6b6b;
+      z-index: 2;
+    }
+    /* 룰렛판: transition을 주면 transform 변화가 '애니메이션'으로 보인다 */
+    #wheel {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 6px solid #fff;
+      transition: transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99);
+    }
+
+    #result {
+      font-size: 32px;
+      font-weight: 800;
+      min-height: 40px;
+      color: #4ecdc4;
+    }
+    #spinBtn {
+      margin-top: 12px;
+      padding: 14px 32px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+      background: #ff6b6b;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    #spinBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* 히스토리 영역 */
+    .history {
+      max-width: 360px;
+      margin: 32px auto 0;
+      text-align: left;
+    }
+    .history h2 {
+      font-size: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #2a2e3c;
+      padding-bottom: 8px;
+    }
+    .history h2 button {
+      font-size: 12px; color: #8b90a0;
+      background: none; border: none; cursor: pointer;
+      text-decoration: underline;
+    }
+    #historyList { list-style: none; padding: 0; margin: 12px 0 0; }
+    #historyList li {
+      padding: 8px 12px;
+      background: #1a1d27;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+    }
+    #historyList li .cat { color: #8b90a0; font-size: 12px; }
+    .empty { color: #8b90a0; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <!-- =========================================================
+       BODY: 제목 + 필터 + 룰렛 + 결과 + 버튼 + 히스토리
+       ========================================================= -->
+  <h1>🍽️ 오늘 뭐 먹지?</h1>
+
+  <!-- 카테고리 필터 버튼은 JS가 자동으로 채운다 -->
+  <div class="filters" id="filters"></div>
+
+  <div class="wheel-box">
+    <div class="pointer"></div>
+    <canvas id="wheel" width="300" height="300"></canvas>
+  </div>
+
+  <div id="result">버튼을 눌러보세요!</div>
+  <button id="spinBtn">룰렛 돌리기 🎰</button>
+
+  <div class="history">
+    <h2>🕒 먹은 기록 <button id="clearBtn">비우기</button></h2>
+    <ul id="historyList"></ul>
+  </div>
+
+  <!-- =========================================================
+       SCRIPT: ① 데이터  ② 필터  ③ drawWheel  ④ spin  ⑤ 히스토리
+       ========================================================= -->
+  <script>
+    // ① 메뉴 데이터 ─ 메뉴마다 '이름(name)'과 '분류(cat)'를 함께 가진다
+    const ALL_MENUS = [
+      { name: "김치찌개",   cat: "한식" },
+      { name: "된장찌개",   cat: "한식" },
+      { name: "제육볶음",   cat: "한식" },
+      { name: "비빔밥",     cat: "한식" },
+      { name: "삼겹살",     cat: "한식" },
+      { name: "초밥",       cat: "일식" },
+      { name: "라멘",       cat: "일식" },
+      { name: "돈카츠",     cat: "일식" },
+      { name: "우동",       cat: "일식" },
+      { name: "규동",       cat: "일식" },
+      { name: "짜장면",     cat: "중식" },
+      { name: "짬뽕",       cat: "중식" },
+      { name: "마라탕",     cat: "중식" },
+      { name: "탕수육",     cat: "중식" },
+      { name: "양꼬치",     cat: "중식" },
+      { name: "파스타",     cat: "양식" },
+      { name: "피자",       cat: "양식" },
+      { name: "스테이크",   cat: "양식" },
+      { name: "햄버거",     cat: "양식" },
+      { name: "리조또",     cat: "양식" },
+    ];
+    const CATEGORIES = ["한식", "일식", "중식", "양식"];
+    const COLORS = ["#ff6b6b", "#ffa94d", "#ffd43b", "#a9e34b", "#38d9a9",
+                    "#4dabf7", "#9775fa", "#f783ac", "#ff8787", "#63e6be"];
+
+    // 선택된 카테고리를 Set으로 관리 (여러 개 동시 선택 가능)
+    // 처음엔 모든 카테고리를 켜둔다 → 전체 메뉴가 보임
+    const selectedCats = new Set(CATEGORIES);
+    const history = []; // 먹은 기록을 쌓을 배열
+
+    // 선택된 카테고리들에 속한 메뉴를 모두 모아 반환
+    function getMenus() {
+      return ALL_MENUS.filter(m => selectedCats.has(m.cat));
+    }
+
+    // canvas 준비
+    const canvas = document.getElementById("wheel");
+    const ctx = canvas.getContext("2d");
+    const cx = canvas.width / 2, cy = canvas.height / 2, radius = cx;
+    let rotation = 0, spinning = false;
+
+    // ② 필터 체크박스 만들기 ─ 카테고리마다 체크박스를 동적으로 생성
+    function buildFilters() {
+      const box = document.getElementById("filters");
+      box.innerHTML = ""; // 다시 그릴 때 기존 항목을 먼저 비운다(중복 방지)
+      CATEGORIES.forEach(cat => {
+        const label = document.createElement("label");
+        label.className = "filter-chip";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selectedCats.has(cat); // 선택 상태 반영
+
+        // 체크/해제할 때마다 Set을 갱신하고 룰렛을 다시 그린다
+        checkbox.onchange = () => {
+          // [버그 방어] 룰렛이 도는 중에 필터를 바꾸면 transition을 끊게 되고,
+          // 그러면 transitionend가 발화하지 않아 spinning=true로 영영 고착된다.
+          // 따라서 스핀 중에는 변경을 막고 체크 상태를 되돌린다.
+          if (spinning) {
+            checkbox.checked = !checkbox.checked;
+            return;
+          }
+
+          if (checkbox.checked) selectedCats.add(cat);
+          else selectedCats.delete(cat);
+
+          // 전부 해제되면 룰렛이 빈다 → 방금 끈 항목을 되살려 최소 1개 유지
+          if (selectedCats.size === 0) {
+            selectedCats.add(cat);
+            checkbox.checked = true;
+            alert("최소 한 종류는 선택해야 해요!");
+            return;
+          }
+          rotation = 0; // 룰렛 회전 초기화
+          canvas.style.transition = "none";
+          canvas.style.transform = "rotate(0deg)";
+          drawWheel(); // 룰렛 다시 그리기
+          // 룰렛이 바뀌었으니 이전 당첨 결과 텍스트도 초기화(불일치 방지)
+          document.getElementById("result").textContent = "버튼을 눌러보세요!";
+        };
+
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(cat));
+        box.appendChild(label);
+      });
+    }
+
+    // ③ drawWheel(): 현재 필터된 메뉴를 부채꼴로 그린다
+    function drawWheel() {
+      const menus = getMenus();
+      const n = menus.length;
+      const arc = (2 * Math.PI) / n;
+      ctx.clearRect(0, 0, canvas.width, canvas.height); // 이전 그림 지우기
+
+      for (let i = 0; i < n; i++) {
+        const start = i * arc - Math.PI / 2; // 12시 방향부터 시작
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + arc);
+        ctx.fillStyle = COLORS[i % COLORS.length];
+        ctx.fill();
+
+        // 라벨을 부채꼴 가운데에 회전 배치
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(start + arc / 2);
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#1a1d27";
+        ctx.font = "bold 14px sans-serif";
+        ctx.fillText(menus[i].name, radius - 10, 5);
+        ctx.restore();
+      }
+    }
+
+    // ④ spin(): 랜덤 당첨을 정하고 그 칸이 포인터에 멈추도록 회전
+    function spin() {
+      if (spinning) return;
+      const menus = getMenus();
+      const n = menus.length;
+      spinning = true;
+      document.getElementById("spinBtn").disabled = true;
+
+      const arcDeg = 360 / n;
+      const winnerIdx = Math.floor(Math.random() * n); // 당첨 인덱스
+      const winnerCenter = winnerIdx * arcDeg + arcDeg / 2;
+
+      // 5바퀴 + 당첨 칸을 맨 위로 보내는 보정각
+      canvas.style.transition = "transform 4s cubic-bezier(0.17,0.67,0.12,0.99)";
+      rotation += 5 * 360 + ((360 - winnerCenter) - (rotation % 360) + 360) % 360;
+      canvas.style.transform = `rotate(${rotation}deg)`;
+
+      canvas.addEventListener("transitionend", function show() {
+        const winner = menus[winnerIdx];
+        document.getElementById("result").textContent = "👉 " + winner.name;
+        addHistory(winner);   // ⑤ 히스토리에 추가
+        spinning = false;
+        document.getElementById("spinBtn").disabled = false;
+        canvas.removeEventListener("transitionend", show);
+      });
+    }
+
+    // ⑤ 히스토리: 결과를 배열에 넣고 화면 목록을 다시 그린다
+    function addHistory(menu) {
+      history.unshift(menu); // 최신을 맨 앞에 추가
+      renderHistory();
+    }
+    function renderHistory() {
+      const list = document.getElementById("historyList");
+      if (history.length === 0) {
+        list.innerHTML = '<li class="empty">아직 기록이 없어요</li>';
+        return;
+      }
+      // 배열을 <li> 문자열로 바꿔 한 번에 그리기
+      list.innerHTML = history
+        .map(m => `<li><span>${m.name}</span><span class="cat">${m.cat}</span></li>`)
+        .join("");
+    }
+
+    // 이벤트 연결 + 첫 화면 그리기
+    document.getElementById("spinBtn").addEventListener("click", spin);
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      history.length = 0; // 배열 비우기
+      renderHistory();
+    });
+    buildFilters();
+    drawWheel();
+    renderHistory();
+  </script>
+</body>
+</html>
